@@ -34,7 +34,7 @@ BuildSNNSeurat <- function (data.use, k.param = 30, prune.SNN = 1/15, nn.eps = 0
 environment(BuildSNNSeurat) <- asNamespace("Seurat")
 
 getClusters <- function(adt_harmony_res, resolution_list){
-    snn_ref <- BuildSNNSeurat(adt_harmony_res, nn.eps = 0) #Fan's(?) verison: nn.eps=0.5
+    snn_ref <- BuildSNNSeurat(adt_harmony_res, nn.eps = 0) 
 
     ids_ref <- Reduce(cbind, mclapply(resolution_list, function(res_use) {
         Seurat:::RunModularityClustering(SNN = snn_ref, modularity = 1,
