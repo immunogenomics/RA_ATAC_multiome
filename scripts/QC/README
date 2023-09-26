@@ -29,6 +29,7 @@ cellQC_postQC_peak_inputs.py
 cellQC_postQC_files.py
 getTabix.py
 CB_counts_fragments.R (fragment input file)
+ArchR_doublets.R
 
 Peaks x cells matrices:
 peaks_by_cells.R
@@ -44,5 +45,5 @@ mRNA_addScrubletToMeta.R
 
 
 Note:
-all scripts have script and input descriptions with -h
+All scripts have script and input descriptions with python or Rscript -h
 
