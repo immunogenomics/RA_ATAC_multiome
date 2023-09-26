@@ -1,0 +1,48 @@
+Directory listing:
+
+ATAC:
+
+BAM deduplication:
+bam_dedup.py (using read/mate start positions only)
+bam_dedup_4ends.py (using read/mate start/CIGAR)
+bam_dedup_stats.py
+concat_bam.py
+
+Make fragment files:
+make_fragments.py
+
+MACS2 peaks:
+MACS2_callpeaks.py (starting from BAM file)
+MACS2_callpeaks_macsPE.py (starting from BEDPE file)
+maxSubPeak.py
+peak_iterative_overlap.py
+extendPeaks.py
+plusMinus_bed.py
+compareBED.py
+
+Cell quality control:
+cellQC_files.py
+CB_counts.py (BAM input file)
+cellQC_stats.R
+cellQC_filter.R
+cellQC_postQC_peak_inputs.py
+cellQC_postQC_files.py
+getTabix.py
+CB_counts_fragments.R (fragment input file)
+
+Peaks x cells matrices:
+peaks_by_cells.R
+concat_matrices.R
+
+
+mRNA:
+
+Cell quality control:
+mRNA_fromCRarc_cellQCfilters.R
+mRNA_scrublet.py
+mRNA_addScrubletToMeta.R
+
+
+Note:
+all scripts have script and input descriptions with -h
+

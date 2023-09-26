@@ -1,0 +1,14 @@
+hg38.chrom.sizes - downloaded from UCSC http://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.chrom.sizes
+hg38_normal_chromosomes.bed - reformatted hg38.chrom.sizes as BED file with chr1-22XY only
+hg38_normal_chromosomes.txt - reformatted hg38.chrom.sizes as regions (chr#:#-#) file with chr1-22XY only
+hg38_other_chromosome.txt - reformatted hg38.chrom.sizes as regions (chr#:#-#) file with not chr1-22XY
+hg38_GENCODEv28_promoters.bed
+hg38-blacklist.v2.bed - downloaded from Boyle Lab https://github.com/Boyle-Lab/Blacklist/raw/master/lists/hg38-blacklist.v2.bed.gz - downloaded gtf from GENCODE ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_28/gencode.v28.basic.annotation.gtf.gz; subsetted to HAVANA protein coding transcripts, reformatted to a BED file, retrieved TSS-2KB regions via flankBed -l 2000 -r 0 -s, sorted via sort, and merged via mergeBed
+GSE92674_control_hg38_sorted.bedGraph - downloaded bigWig from GEO https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92674/suppl/GSE92674_C1_gDNA_corrected_merged.bigWig; converted to bedgraph via bigWigToBedGraph
+GSE92674_control_hg38_macsPE_sorted.bed - converted bedgraph to BEDPE via macs2 randsample
+
+control files were too big for Github. to make:
+$ wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92674/suppl/GSE92674_C1_gDNA_corrected_merged.bigWig
+$ bigWigToBedGraph GSE92674_C1_gDNA_corrected_merged.bigWig GSE92674_control_hg38_sorted.bedGraph
+$ macs2 randsample -i GSE92674_control_hg38_sorted.bedGraph -f BEDPE -p 100 -o GSE92674_control_hg38_macsPE.bed
+$ sort -k1,1 -k2,2n GSE92674_control_hg38_macsPE.bed > GSE92674_control_hg38_macsPE_sorted.bed
