@@ -3,6 +3,8 @@ suppressMessages({
     library(gtools)
     library(Rmisc)
     library(ROCR)
+    library(presto)
+    library(ggpubr)
     
     library(plyr)
     library(stringr)
@@ -13,6 +15,7 @@ suppressMessages({
     library(ggrepel)
     library(viridis)
     library(scales)
+    library(RColorBrewer)
     library(grid)
     library(gridExtra)
     library(repr)
@@ -105,18 +108,73 @@ mixedsort_new <- function (x, decreasing = FALSE, na.last = TRUE, blank.last = F
     x[ord]
 }
 
+gene_order <- function(mat){
+    ll <- as.data.frame(apply(mat,1,which.max),stringsAsFactors=F)
+    colnames(ll) <- c('whichMax')
+    ll$gene <- rownames(ll)
+    ll$scaleExp <- NA
+    for(idx in 1:nrow(ll)){
+        gg <- ll[idx,'gene']
+        cc <- as.numeric(ll[idx,'whichMax'])
+        ll[idx,'scaleExp'] <- mat[gg,cc]
+    }
+    ll <- ll[order(ll$whichMax,ll$scaleExp,decreasing=T),]
+    return(rownames(ll))
+}
+
+full_order_from_abbr <- function(df,abbr_col,full_col,abbr_order){
+    ll <- unique(df[,c(abbr_col,full_col)])
+    ll[,abbr_col] <- factor(ll[,abbr_col],levels=abbr_order)
+    ll <- ll[order(ll[,abbr_col]),]
+    full_order <- ll[,full_col]
+    return(full_order)
+}
+
+reorder_peaks <- function(df,cutHeight,cutOrder,xCol='peak',yCol='CITE_abbr',valCol='value',
+                          distMethod='euclidean',clustMethod='ward.D2'){
+    
+    if(!all(c(xCol,yCol,valCol) %in% colnames(df))) stop('not all columns in df')
+    
+    toMat <- spread(df[,c(xCol,yCol,valCol)],key=yCol,value=valCol)
+    thisMat <- as.matrix(toMat[,2:ncol(toMat)])
+    rownames(thisMat) <- toMat[,1]
+    
+    row_clust <- hclust(dist(thisMat, method = distMethod), method = clustMethod)
+    cuttree <- cutree(row_clust,h=cutHeight)
+
+    heatmap_peak_order <- rev(row_clust$labels[row_clust$order])
+    heatmap_peak_reorder <- c()
+    for(idx in rev(cutOrder)){ 
+        thesePeaks <- names(cuttree[which(cuttree==idx)])
+        thesePeaks <- factor(thesePeaks,levels=heatmap_peak_order)
+        thesePeaks <- thesePeaks[order(thesePeaks)]
+        heatmap_peak_reorder <- c(heatmap_peak_reorder,as.character(thesePeaks))
+    }
+    if(!identical(sort(heatmap_peak_order),sort(heatmap_peak_reorder))) stop('peak order issue')
+    
+    return(heatmap_peak_reorder)
+}
+
+fix_hyphen_names <- function(s){
+    if(str_detect(s,'[A-Za-z]{2}[0-9]+')){paste(sep='',substr(s,1,2),'-',substr(s,3,nchar(s)))}
+    else if(str_detect(s,'[A-Za-z][0-9]+')){paste(sep='',substr(s,1,1),'-',substr(s,2,nchar(s)))}
+    else{s}
+}
+
 
 ##CELL COUNTS
 
 #CELL COUNTS BY SAMPLE BAR PLOT
-cellCount_bySample_barPlot <- function(thisMeta,thisCol,res_toPlot,fLab,cluster_colors,assayCol='assay',
-                                       colOrder=c('BRI-448','BRI-449','BRI-450',
-                                                  'BRI-542','BRI-543','BRI-544','BRI-545','BRI-546','BRI-547',
-                                                  'BRI-639','BRI-640','BRI-641','BRI-642','BRI-643','BRI-644',
-                                                  'BRI-645','BRI-646','BRI-647',
+cellCount_bySample_barPlot <- function(thisMeta,thisCol,res_toPlot,fLab,cluster_colors,assayCol='assay',colorCol='disease',
+                                       yLab_marker='>',
+                                       colOrder=c('BRI-449','BRI-450',
+                                                  'BRI-542','BRI-544','BRI-545','BRI-546','BRI-547',
+                                                  'BRI-639','BRI-640','BRI-641','BRI-643','BRI-644','BRI-646','BRI-647',
+                                                  'BRI-448','BRI-543','BRI-642','BRI-645',
                                                   'BRI-1281','BRI-1385','BRI-1387','BRI-1389',
                                                   'BRI-1586','BRI-1588','BRI-1590','BRI-1592','BRI-1594','BRI-1607',
-                                                  'BRI-1609','BRI-1611')){
+                                                  'BRI-1609','BRI-1611'),
+                                       OA_samples=c('BRI-448', 'BRI-543', 'BRI-642', 'BRI-645', 'BRI-1281')){
 
     if(!any(colOrder %in% thisMeta[,thisCol])){
         colOrder <- mixedsort_new(unique(thisMeta[,thisCol]))
@@ -129,15 +187,29 @@ cellCount_bySample_barPlot <- function(thisMeta,thisCol,res_toPlot,fLab,cluster_
     toPlot <- as.data.frame(table(thisMeta[,c(thisCol,res_toPlot)]),stringsAsFactors=FALSE)
     toPlot[,res_toPlot] <- factor(toPlot[,res_toPlot],levels=sort(unique(toPlot[,res_toPlot])))
     toPlot[,thisCol] <- factor(toPlot[,thisCol],levels=rev(colOrder))
+    if(colorCol=='disease' & thisCol=='sample'){
+        sample_yLab <- rep('',length(colOrder))
+        names(sample_yLab) <- colOrder
+        sample_yLab[which(names(sample_yLab) %in% OA_samples)] <- yLab_marker
+        
+        conv_df <- data.frame('sample'=colOrder,'disease'='RA',stringsAsFactors=FALSE)
+        conv_df[which(conv_df$sample %in% OA_samples),'disease'] <- 'OA'
+        toPlot[,colorCol] <- mapvalues(toPlot[,thisCol],from=conv_df$sample,to=conv_df$disease)
+    }
 
-    g <- ggplot(toPlot,aes_string(fill=res_toPlot,x='Freq',y=thisCol)) + 
+    g <- ggplot(toPlot,aes_string(fill=res_toPlot,x='Freq',y=thisCol,color=colorCol)) + 
             geom_bar(position="stack", stat="identity") + theme_classic(base_size=25) + 
-            labs(x='Cell Counts',y='snATAC     Sample     scATAC',fill=fLab) + 
-            geom_hline(yintercept=modalityLine,linetype='dashed') +
-            theme(axis.text.y=element_blank(),axis.ticks.y=element_blank())
+            labs(x='Cell Counts',y='Sample\nsnATAC                       scATAC',fill=fLab) + 
+            geom_hline(yintercept=modalityLine,linetype='dashed') + guides(color=guide_legend(override.aes=list(fill='white')))
+    
+    if(colorCol=='disease' & thisCol=='sample'){
+            g <- g + scale_y_discrete(labels=sample_yLab) + labs(color='Disease') + 
+                        scale_color_manual(values=c(NA,'grey15'),labels=c('RA',paste(sep='',yLab_marker,'OA'))) + 
+                        theme(axis.ticks.y=element_blank())
+    }
 
     if(all(unique(toPlot[,res_toPlot]) %in% names(cluster_colors))){g <- g + scale_fill_manual(values=cluster_colors)}
-    
+        
     return(g)
 }
 
@@ -253,7 +325,6 @@ plot_markerPeaks_norm_hex_v2 <- function(thisMeta, thisGxC, xCol, yCol, plotCol=
 
 }
 
-
 #Process normalized matrices for heatmaps
 scaleFeat_forHeatmap <- function(gOrd,ctOrd,gp_map,gCTnorm,pCTnorm,geneCTcutoff=0.15,peakCTcutoff=0.05){
     
@@ -284,7 +355,7 @@ scaleFeat_forHeatmap <- function(gOrd,ctOrd,gp_map,gCTnorm,pCTnorm,geneCTcutoff=
         pCTnorm_subset <- rbind(pCTnorm_subset,toAdd)
     }
     
-    identical(sort(rownames(gCTnorm_subset)),sort(rownames(pCTnorm_subset)))
+    if(!identical(sort(rownames(gCTnorm_subset)),sort(rownames(pCTnorm_subset)))) stop('rowname issue')
     pCTnorm_subset <- pCTnorm_subset[rownames(gCTnorm_subset),]
     if(length(peaks_toWhite)>0) pCTnorm_subset[peaks_toWhite,] <- 0
     
@@ -314,10 +385,9 @@ scaleFeat_forHeatmap <- function(gOrd,ctOrd,gp_map,gCTnorm,pCTnorm,geneCTcutoff=
     
 }
 
-
 #feature heatmaps
 #assumes that the given row/col is the order you want!
-pseudobulk_scaled_heatmap <- function(toPlot,xlab,ylab,fillLab,plotTit=NULL,scale_lim=NA,clustColors=NA,
+pseudobulk_scaled_heatmap <- function(toPlot,xlab,ylab,fillLab,plotTit=NULL,scale_lim=NA,clustColors=NA,includeZero=FALSE,
                                       colorLow='blue',colorMid='white',colorHigh='red'){
     
     toGather <- as.data.frame(toPlot)
@@ -331,7 +401,12 @@ pseudobulk_scaled_heatmap <- function(toPlot,xlab,ylab,fillLab,plotTit=NULL,scal
     if(!is.na(scale_lim)){
         scale_limits <- c(-scale_lim,scale_lim)
     } else {
-        scale_limits <- c(min(gathered$agg),max(gathered$agg))
+        if(min(gathered$agg)>0 & includeZero){
+            ll <- 0
+        } else {
+            ll <- min(gathered$agg)
+        }
+        scale_limits <- c(ll,max(gathered$agg))
     }
     
     g <- ggplot(gathered,aes_string(x='peak',y='CT',fill='agg')) + geom_tile() +
@@ -347,8 +422,99 @@ pseudobulk_scaled_heatmap <- function(toPlot,xlab,ylab,fillLab,plotTit=NULL,scal
     
 }
 
+get_differential_features <- function(dP_df,dG_df,name_abbr_df,gxCT_nss,withinE=0.75,top_n=5,
+                                      log2FC_cutoff=0.5,logFC_cutoff=0.5,log10padj_cutoff=5){
+    
+    #within max for class markers; some markers are useful for multiple classes
+    this_gxCT_scaled <- as.data.frame(gxCT_nss)
+    this_gxCT_scaled$maxE2 <- apply(this_gxCT_scaled,1,function(x){sort(x,decreasing=TRUE)[2]})
+    this_gxCT_scaled$maxE <- apply(this_gxCT_scaled,1,max)
+    this_gxCT_scaled$maxE2_cutoff <- this_gxCT_scaled$maxE*withinE
+    this_gxCT_scaled$withinMaxE <- this_gxCT_scaled$maxE2>=this_gxCT_scaled$maxE2_cutoff
+    
+    dF_df <- data.frame('class'=character(),'peak'=character(),'gene'=character(),
+                                 'peakFC'=numeric(),'peakPadj'=numeric(),'geneFC'=numeric(),'genePadj'=numeric(),
+                                 'topPeak'=logical(),'topGene'=logical(),'marker'=logical(),stringsAsFactors=FALSE)
 
-##SYMPHONY PROPORTION FUNCTIONS
+    for(cl in unique(dP_df$cellType)){
+        #subset markers by class
+        full_name <- name_abbr_df[which(name_abbr_df$cluster_abbr==cl),'cluster_name']
+        markGenes <- unique(c(rownames(this_gxCT_scaled[which(this_gxCT_scaled[,cl]>=this_gxCT_scaled$maxE2_cutoff),]), 
+                              sub('\\+','',grep('[A-Za-z0-9]+\\+',unlist(str_split(full_name,' ')),value=TRUE)),
+                              sub('hi','A',grep('[A-Za-z0-9]+hi',unlist(str_split(full_name,' ')),value=TRUE))))
+        markPeaks <- chosenPeaks[markGenes]
+
+        #chosen markers
+        mp <- dP_df[which(dP_df$cellType==cl & dP_df$peak %in% unname(markPeaks)),]
+        #in case a peak overlaps multiple TSS
+        mp$gene <- mapvalues(mp$peak,from=unname(markPeaks),names(markPeaks),warn_missing=FALSE)
+        mg <- dG_df[which(dG_df$group==cl & dG_df$feature %in% markGenes),]
+        mf <- merge(mg,mp,by.x='feature',by.y='gene',all=TRUE)
+        #making a new dataframe for this class
+        toAdd <- data.frame('class'=rep(cl,nrow(mf)),'peak'=mf$peak,'gene'=mf$feature,
+                            'peakFC'=mf$log2FC,'peakPadj'=mf$log10padj.y,
+                            'geneFC'=mf$logFC,'genePadj'=mf$log10padj.x,
+                            'topPeak'=rep(FALSE,nrow(mf)),'topGene'=rep(FALSE,nrow(mf)),'marker'=rep(TRUE,nrow(mf)),
+                            stringsAsFactors=FALSE)
+
+        #top peaks
+        tp <- dP_df[which(dP_df$cellType==cl & dP_df$log2FC>log2FC_cutoff & dP_df$log10padj>log10padj_cutoff),]
+        tp <- head(tp[order(tp$log10padj,decreasing=TRUE),],n=top_n)
+        #don't need to readd peaks accounted for in markers
+        toAdd[which(toAdd$peak %in% tp$peak),'topPeak'] <- TRUE
+        tp <- tp[which(!(tp$peak %in% toAdd$peak)),]
+        if(nrow(tp)>0){
+            #get gene info
+            tp_genes <- dG_df[which(dG_df$group==cl & dG_df$feature %in% tp$gene),]
+            for(gn in tp[which(!(tp$gene %in% tp_genes$feature)),'gene']) {tp_genes <- rbind(tp_genes,c(gn,cl,rep(NA,9)))}
+            rownames(tp_genes) <- tp_genes$feature
+            tp_genes <- tp_genes[tp$gene,]
+            toAdd <- rbind(toAdd,data.frame('class'=rep(cl,nrow(tp)),'peak'=tp$peak,'gene'=tp$gene,
+                                            'peakFC'=tp$log2FC,'peakPadj'=tp$log10padj,
+                                            'geneFC'=tp_genes$logFC,'genePadj'=tp_genes$log10padj,
+                                            'topPeak'=rep(TRUE,nrow(tp)),'topGene'=rep(FALSE,nrow(tp)),
+                                            'marker'=rep(FALSE,nrow(tp)),stringsAsFactors=FALSE))
+        }
+
+        #top genes
+        tg <- dG_df[which(dG_df$group==cl & dG_df$logFC>logFC_cutoff & dG_df$log10padj>log10padj_cutoff),]
+        tg <- head(tg[order(tg$log10padj,tg$logFC,decreasing=TRUE),],n=top_n)
+        #don't need to readd genes already accounted for
+        toAdd[which(toAdd$gene %in% tg$feature),'topGene'] <- TRUE
+        tg <- tg[which(!(tg$feature %in% toAdd$gene)),]
+        if(nrow(tg)>0){
+            #assign peaks to genes
+            tg$peak <- NA; tg$peakFC <- NA; tg$peakPadj <- NA
+            for(gn in tg$feature){
+                tg_peaks <- dP_df[which(dP_df$cellType==cl & dP_df$gene==gn),]
+                if(nrow(tg_peaks)==0){
+                    #if no genes, leave NA
+                    next
+                } else {
+                    #choose most significant - not including log2FC check here
+                    tg_peaks <- tg_peaks[order(tg_peaks$log10padj,decreasing=TRUE),]
+                    tg[which(tg$feature==gn),'peak'] <- tg_peaks[1,'peak']
+                    tg[which(tg$feature==gn),'peakFC'] <- tg_peaks[1,'log2FC']
+                    tg[which(tg$feature==gn),'peakPadj'] <- tg_peaks[1,'log10padj']
+                }
+            }
+            toAdd <- rbind(toAdd,data.frame('class'=rep(cl,nrow(tg)),'peak'=tg$peak,'gene'=tg$feature,
+                                            'peakFC'=tg$peakFC,'peakPadj'=tg$peakPadj,
+                                            'geneFC'=tg$logFC,'genePadj'=tg$log10padj,
+                                            'topPeak'=rep(FALSE,nrow(tg)),'topGene'=rep(TRUE,nrow(tg)),
+                                            'marker'=rep(FALSE,nrow(tg)),stringsAsFactors=FALSE))
+        }
+
+        dF_df <- rbind(dF_df,toAdd)
+    }
+    
+    return(dF_df)
+}
+
+
+##SYMPHONY RELATED FUNCTIONS
+
+#proportions
 symp_prop_df <- function(queryDF,refDF,xLab,yLab,cLab,
                          qSamp_col='sample',qCT_col='CITE_abbr',rSamp_col='sample',rCT_col='cluster_abbr',
                          clustColors=NA,expand_flag=FALSE){
@@ -358,7 +524,6 @@ symp_prop_df <- function(queryDF,refDF,xLab,yLab,cLab,
     query_CT_sample_freq_df$sample_tot <- as.numeric(mapvalues(query_CT_sample_freq_df[,qSamp_col],
                                                                from=query_sample_freq_df$Var1,to=query_sample_freq_df$Freq))
     query_CT_sample_freq_df$perc <- query_CT_sample_freq_df$Freq/query_CT_sample_freq_df$sample_tot
-    #head(query_CT_sample_freq_df)
     if(!all(for(idx in unique(queryDF[,qSamp_col])){
         sum(query_CT_sample_freq_df[which(query_CT_sample_freq_df[,qSamp_col]==idx),'perc'])==1})) stop('not all query fractions sum to 1')
     query_CT_freq_df <- as.data.frame(table(queryDF[,qCT_col]),stringsAsFactors=FALSE)
@@ -397,7 +562,7 @@ symp_prop_df <- function(queryDF,refDF,xLab,yLab,cLab,
     g <- ggplot(both_CT_bySample_stats,aes_string(x='qry_mean',y='ref_mean',color='cellType')) + geom_point(size=3) + 
             theme_bw(base_size=20) + 
             labs(x=xLab,y=yLab,color=cLab) +
-            ggtitle(paste(sep='','R=',round(ll$estimate,2),' p-value=',signif(ll$p.value,3))) + 
+            ggtitle(paste(sep='','R=',round(ll$estimate,2),' P=',signif(ll$p.value,3))) + 
             theme(plot.title=element_text(size=23,hjust = 0.5)) +
             geom_abline(slope=1,intercept=0, linetype='dashed') + 
             expand_limits(x=0) + expand_limits(y=0) + 
@@ -416,7 +581,49 @@ symp_prop_df <- function(queryDF,refDF,xLab,yLab,cLab,
         
 }
 
+#accuracy of mapping score
+symphony_mapScore_byCT <- function(inDir,cs_suffix='_class_state_df.rds',meta_suffix='_ATAC_meta.rds',
+                                   CTs=c('Bplasma','endothelial','stromal','myeloid','Tcell'),
+                                   assay_col='assay',assayVal='snATAC',
+                                   val_col='CITE_prob',outVal='out',inVal='in',
+                                   classA_col='cluster_abbr',stateA_col='CITE_abbr',
+                                   classB_col='class',stateB_col='state'){
+    
+    if(!file.exists(inDir)) stop('Input directory does not exist.')
+    
+    df <- data.frame('cellType'=character(),'group'=character(),'perc'=numeric(),stringsAsFactors=FALSE)
+    for(CT in CTs){
+        meta_file <- paste(sep='',inDir,CT,'/',CT,meta_suffix)
+        class_state_file <- paste(sep='',inDir,CT,'/',CT,cs_suffix)
+        if(!all(file.exists(c(meta_file,class_state_file)))) stop('Input file(s) do not exist.')
+        
+        meta <- readRDS(meta_file)
+        class_state_df <- readRDS(class_state_file)
+        
+        if(!all(c(assay_col,val_col,stateA_col,classA_col) %in% colnames(meta))) stop('meta column(s) missing')
+        if(!all(c(stateB_col,classB_col) %in% colnames(class_state_df))) stop('class/state column(s) missing')
 
+        meta <- meta[which(meta[,assay_col]==assayVal),]
+
+        meta$group <- outVal
+        for(idx in 1:nrow(class_state_df)){
+            meta[which(meta[,stateA_col]==class_state_df[idx,stateB_col] & 
+                       meta[,classA_col]==class_state_df[idx,classB_col]),'group'] <- inVal
+        }
+        
+        bin_col <- paste(sep='_',val_col,'binary')
+        meta[,bin_col] <- ifelse(meta[,val_col]==1,1,0)
+
+        in_group_perc <- nrow(meta[which(meta[,bin_col]==1 & meta$group==inVal),])/nrow(meta[which(meta$group==inVal),])
+        out_group_perc <- nrow(meta[which(meta[,bin_col]==1 & meta$group==outVal),])/nrow(meta[which(meta$group==outVal),])
+
+        df <- rbind(df,data.frame('cellType'=c(CT,CT),'group'=c(inVal,outVal),'perc'=c(in_group_perc,out_group_perc),
+                                  stringsAsFactors=FALSE))
+
+    }
+    
+    return(df)
+}
 
 
 ##ODDS RATIO FUNCTIONS
@@ -453,9 +660,24 @@ reorder_col_diag_plotOR <- function(fish_df,xCol,yCol,yOrd=NA,mCol='lnOR',op='ma
     }
     #reverse row order since that's what the plot does!
     row_col_maxOR_df <- row_col_maxOR_df[order(row_col_maxOR_df$row,decreasing=TRUE),]
-    #print(row_col_maxOR_df)
     new_xOrd <- row_col_maxOR_df$col
     return(new_xOrd)
+}
+
+#For plotting purposes
+label_spacing <- function(s,wiggle=1){
+    if(substr(s,nchar(s)-wiggle,nchar(s)-wiggle)=='\n'){substr(s,nchar(s)-wiggle,nchar(s)-wiggle) <- ' '}
+    return(s)
+}
+
+#For plotting purposes
+fix_infinite <- function(this_vec,addVal=1,multVal=1){
+    nonInf <- this_vec[which(!is.infinite(this_vec))]
+    limit <- ceiling(max(nonInf,abs(min(nonInf)))*multVal)+addVal
+    this_vec[which(is.infinite(this_vec) & this_vec>0)] <- limit
+    this_vec[which(is.infinite(this_vec) & this_vec<0)] <- -limit
+    
+    return(this_vec)
 }
 
 calc_OR <- function(toPlot, xCol, yCol, pLim = 0.05,includeNomP = FALSE){
@@ -498,30 +720,16 @@ calc_OR <- function(toPlot, xCol, yCol, pLim = 0.05,includeNomP = FALSE){
     fisher_res_df$sig <- ifelse(fisher_res_df$pval<=pLim,TRUE,FALSE)
     fisher_res_df$padj <- p.adjust(fisher_res_df$pval,method='BH')
     fisher_res_df$sigBH <- ifelse(fisher_res_df$padj<=pLim,TRUE,FALSE)
-    #print("Number of significant cluster links pre- and post- MHTC")
-    #print(table(fisher_res_df[,c('sig','sigBH')]))
     fisher_res_df$signif <- 'not'
     if(includeNomP){
         fisher_res_df[which(fisher_res_df$sigBH==FALSE & fisher_res_df$sig==TRUE),'signif'] <- 'nominal'
     }
     fisher_res_df[which(fisher_res_df$sigBH==TRUE),'signif'] <- 'BH'
-    #print("signif comparison")
-    #print(table(fisher_res_df$signif))
 
-    fisher_res_df$lnOR <- log(fisher_res_df$OR)
-    nonInf <- fisher_res_df[which(!is.infinite(fisher_res_df$lnOR)),'lnOR']
-    limit <- ceiling(max(nonInf,abs(min(nonInf))))+1
-    #print(paste("initial max:",max(nonInf),"initial min",min(nonInf),"new limit:",limit))
-    fisher_res_df[which(is.infinite(fisher_res_df$OR)),'lnOR'] <- limit
-    fisher_res_df[which(fisher_res_df$OR==0),'lnOR'] <- (limit*-1)
+    fisher_res_df$lnOR <- fix_infinite(log(fisher_res_df$OR))
     
     return(fisher_res_df)
 
-}
-
-label_spacing <- function(s,wiggle=1){
-    if(substr(s,nchar(s)-wiggle,nchar(s)-wiggle)=='\n'){substr(s,nchar(s)-wiggle,nchar(s)-wiggle) <- ' '}
-    return(s)
 }
 
 #OR - calculate and plot OR values between two columns of a dataframe
@@ -580,23 +788,14 @@ plot_OR <- function(toPlot, xCol, yCol, xLab, yLab, xOrder, yOrder, xAxisVert = 
 }
 
 
-## LDA PLOTTING FUNCTIONS
+##LDA PLOTTING FUNCTIONS
 
 #plot LDA results
-LDA_plots <- function(predMod_df,thisCT,c01Lab,c0_col='c0',c1_col='c1',thisFeat='AUC',simplifyCT=TRUE,
+LDA_plots <- function(predMod_df,thisCT,c01Lab,c0_col='c0',c1_col='c1',thisFeat='AUC',
                       class_state_df=NA,class_col='class',state_col='state',ctOrd_col=NA,
                       ctOrd=NA,toColor=NA,clustColors=NA,plot_square=TRUE){
     
     if(!all(c('cellType',c0_col,c1_col,'feature','value') %in% colnames(predMod_df))) stop('predMod_df columns: cellType, c0, c1, feature, value')
-        
-    if(simplifyCT){
-        predMod_df$c0_abbr <- str_split_fixed(predMod_df[,c0_col],":",2)[,1]
-        predMod_df$c1_abbr <- str_split_fixed(predMod_df[,c1_col],":",2)[,1]
-        ctOrd <- str_split_fixed(ctOrd,':',2)[,1]
-        
-        c0_col <- 'c0_abbr'
-        c1_col <- 'c1_abbr'
-    }
     
     all_LDA_states <- unique(c(predMod_df[,c0_col],predMod_df[,c1_col]))
     
@@ -629,8 +828,6 @@ LDA_plots <- function(predMod_df,thisCT,c01Lab,c0_col='c0',c1_col='c1',thisFeat=
         toColor <- rgb( ramp(seq(0, 1, length = color_bins)), max = 255)
     }
     
-    #print(LDA_class_state_AUC(class_state_df,predMod_df,thisCT,c0_col=c0_col,c1_col=c1_col,simplifyCT=FALSE,thisFeat=thisFeat))
-
     toPlot <- predMod_df[which(predMod_df$cellType==thisCT & predMod_df$feature==thisFeat),
                          c('cellType',c0_col,c1_col,'feature','value')]
 
@@ -646,7 +843,6 @@ LDA_plots <- function(predMod_df,thisCT,c01Lab,c0_col='c0',c1_col='c1',thisFeat=
         }
     }
 
-    #options(repr.plot.height=10,repr.plot.width=12,dpi=600)
     toPlot[,c0_col] <- factor(toPlot[,c0_col], levels=ctOrd)
     toPlot[,c1_col] <- factor(toPlot[,c1_col], levels=rev(ctOrd))
     g <- ggplot(toPlot, aes_string(x=c0_col,y=c1_col,fill='value')) + geom_tile() + theme_classic(base_size=30) +
@@ -666,7 +862,6 @@ LDA_plots <- function(predMod_df,thisCT,c01Lab,c0_col='c0',c1_col='c1',thisFeat=
             numStates <- nrow(class_state_df[which(class_state_df$class==cc),])
             yMin <- yMax-numStates
             xMax <- xMin+numStates
-            #print(paste(cc,xMin,xMax,yMin,yMax))
             g <- g + geom_rect(xmin=xMin, xmax=xMax, ymin=yMin, ymax=yMax,alpha=0,
                                color=unname(clustColors[as.character(cc)]),size=2.5) 
             yMax <- yMin
@@ -774,6 +969,7 @@ donor_prop_comp_plot <- function(ID_conv_df,scATAC_meta,CITE_meta,
     
     ID_conv_df <- ID_conv_df[which(!(ID_conv_df[,cAtac_col] %in% atac_ID_tooSmall) & 
                                    !(ID_conv_df[,cMrna_col] %in% mrna_ID_tooSmall)),]
+    cat(paste('Using',nrow(ID_conv_df),'donors.\n'))
     
     CITE_CT_sample_freq_df <- as.data.frame(table(CITE_meta[which(CITE_meta[,mSamp_col] %in% ID_conv_df[,cMrna_col]),
                                                                   c(mCT_col,mSamp_col)]),stringsAsFactors=FALSE)
@@ -788,7 +984,6 @@ donor_prop_comp_plot <- function(ID_conv_df,scATAC_meta,CITE_meta,
     CITE_CT_sample_freq_df$perc <- CITE_CT_sample_freq_df$Freq/CITE_CT_sample_freq_df$sample_tot
     rownames(CITE_CT_sample_freq_df) <- paste(sep='_',str_split_fixed(CITE_CT_sample_freq_df$scsnATAC,":",2)[,1],
                                               CITE_CT_sample_freq_df[,cID_col])
-    #head(CITE_CT_sample_freq_df)
     if(!all(for(idx in unique(ID_conv_df[,cMrna_col])){
         sum(CITE_CT_sample_freq_df[which(CITE_CT_sample_freq_df[,mSamp_col]==idx),'perc'])!=1})) stop('not all CITE fractions sum to 1')
     
@@ -806,7 +1001,6 @@ donor_prop_comp_plot <- function(ID_conv_df,scATAC_meta,CITE_meta,
     scATAC_CT_sample_freq_df$perc <- scATAC_CT_sample_freq_df$Freq/scATAC_CT_sample_freq_df$sample_tot
     rownames(scATAC_CT_sample_freq_df) <- paste(sep='_',str_split_fixed(scATAC_CT_sample_freq_df$scsnATAC,":",2)[,1],
                                                 scATAC_CT_sample_freq_df[,cID_col])
-    #head(scATAC_CT_sample_freq_df)
     if(!all(for(idx in unique(ID_conv_df[,cAtac_col])){
         sum(scATAC_CT_sample_freq_df[which(scATAC_CT_sample_freq_df[,aSamp_col]==idx),'perc'])==1})) stop('not all ATAC fractions sum to 1')
     
@@ -827,11 +1021,11 @@ donor_prop_comp_plot <- function(ID_conv_df,scATAC_meta,CITE_meta,
 
         expand_val <- round(max(toPlot$scATAC_percent,toPlot$CITE_percent),2)
 
-        g <- ggplot(toPlot,aes_string(x='scATAC_percent',y='CITE_percent',color='scsnATAC')) + #'subject_id')) +
+        g <- ggplot(toPlot,aes_string(x='scATAC_percent',y='CITE_percent',color='scsnATAC')) + 
                 geom_point(size=3) + theme_bw(base_size=20) + 
                 geom_abline(slope=1,intercept=0,linetype='dashed') + 
                 expand_limits(x=0) + expand_limits(y=0) + expand_limits(x=expand_val) + expand_limits(y=expand_val) +
-                labs(x=aLab,y=mLab,title=paste(sep='',tVec[cs],'\nR=',round(ll$estimate,2),' pval=',signif(ll$p.value,3))) +
+                labs(x=aLab,y=mLab,title=paste(sep='',tVec[cs],'\nR=',round(ll$estimate,2),' P=',signif(ll$p.value,3))) +
                 theme(plot.title = element_text(hjust = 0.5,size=tSize)) + theme(legend.position="none")
         if(all(unique(toPlot$scsnATAC) %in% names(clustColors))){
             g <- g + scale_color_manual(values=clustColors)
@@ -871,11 +1065,11 @@ CNA_add_col <- function(CITE_meta, cna_res, cna_col, ncorr_col='res_ncorrs'){
 
 #CNA VIOLIN PLOTS - group CNA correlations by class/state
 CNA_violin_plots <- function(toPlot,xCol,yCol,fdr_thresh,toColor=NA,reord=TRUE,
-                             thisTitle='',xLab='',yLab='Neighborhood\ncorrelation'){
+                             thisTitle='',xLab='',yLab='Neighborhood\ncorrelation',clustColors=NA){
     
     if(any(is.na(toColor))){
-        myPalette <- colorRampPalette(c(RColorBrewer::brewer.pal(11, "RdBu")[11:7], "#DCDCDC", 
-                                        RColorBrewer::brewer.pal(11, "RdBu")[5:1]))
+        myPalette <- colorRampPalette(c(brewer.pal(11, "RdBu")[11:7], "#DCDCDC", 
+                                        brewer.pal(11, "RdBu")[5:1]))
         toColor <- myPalette(100)
     }
         
@@ -887,7 +1081,7 @@ CNA_violin_plots <- function(toPlot,xCol,yCol,fdr_thresh,toColor=NA,reord=TRUE,
     }
     
     g <- ggplot(toPlot,aes_string(x = xCol, y = yCol)) + coord_flip() +
-      ggrastr::geom_quasirandom_rast(aes_string(color=yCol), width = 0.3, size = 0.001) +
+      geom_quasirandom_rast(aes_string(color=yCol), width = 0.3, size = 0.001) +
       stat_summary(aes_string(group = xCol), fun = median, fun.min = median, fun.max = median, 
                        geom = "crossbar", color = "grey10", width = 0.5, lwd = 0.2, linetype = 2) +
       scale_colour_gradientn(na.value="#DCDCDC",colours = toColor,
@@ -902,6 +1096,11 @@ CNA_violin_plots <- function(toPlot,xCol,yCol,fdr_thresh,toColor=NA,reord=TRUE,
             axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
             axis.text.y = element_text(color = "black"),axis.title.x=element_text(size=22))
     
+    if(all(levels(toPlot[,xCol]) %in% names(clustColors))){
+        suppressWarnings(g <- g + theme(axis.text.y = element_text(color=clustColors[levels(toPlot[,xCol])],
+                                                                   face='bold',size=18)))
+    }
+    
     return(g)
 
 }
@@ -910,8 +1109,8 @@ CNA_violin_plots <- function(toPlot,xCol,yCol,fdr_thresh,toColor=NA,reord=TRUE,
 CNA_umap_plots <- function(toPlot,xCol,yCol,corrCol,thisTitle='',xLab='UMAP1',yLab='UMAP2',colorLab='r',smallPt=FALSE,
                            fdr_thresh=NA,fdr_color='#DCDCDC'){
 
-    myPalette <- colorRampPalette(c(RColorBrewer::brewer.pal(11, "RdBu")[11:7], "#DCDCDC", 
-                                    RColorBrewer::brewer.pal(11, "RdBu")[5:1]))
+    myPalette <- colorRampPalette(c(brewer.pal(11, "RdBu")[11:7], "#DCDCDC", 
+                                    brewer.pal(11, "RdBu")[5:1]))
 
     #Any cells that do not pass the global FDR p-value should not be shown
     if(!is.na(fdr_thresh)) {toPlot[which(abs(toPlot[,corrCol])<fdr_thresh),corrCol] <- NA}
@@ -931,8 +1130,7 @@ CNA_umap_plots <- function(toPlot,xCol,yCol,corrCol,thisTitle='',xLab='UMAP1',yL
 
 ##ARCHR PLOTTING FUNCTIONS
 
-getGEfromJ20 <- function(x,gene_vec){
-    
+getTFfromMotif <- function(x){
     split1 <- str_split_fixed(x,'_',2)[,1]
     if(grepl('\\.\\.',split1)){
         mot_list <- unlist(as.list(str_split(split1,'\\.\\.')))
@@ -946,6 +1144,14 @@ getGEfromJ20 <- function(x,gene_vec){
     if(grepl('\\.',paste(collapse=',',mot_list))){
         mot_list <- str_split_fixed(mot_list,'\\.',2)[,1]
     }
+    
+    return(mot_list)
+}
+
+#get gene expression from JASPAR2020 set
+getGEfromJ20 <- function(x,gene_vec){
+    
+    mot_list <- getTFfromMotif(x)
     
     if(!all(mot_list %in% names(gene_vec))) stop(paste('missing gene:',paste(mot_list,collapse=', ')))
         
@@ -1001,6 +1207,13 @@ plotMatMotif <- function(toPlot,
             theme_classic(base_size=18) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
             scale_fill_gradientn(colors = fillGrad) + 
             labs(x=xLab,y=yLab,fill=fLab)
+        
+    #fix xColors to include the (max val)
+    if(!is.null(xColors) & !any(levels(heat_df$xx) %in% names(xColors))){
+        names(xColors) <- lapply(names(xColors),FUN=function(x){levels(heat_df$xx)[charmatch(x,levels(heat_df$xx))]})
+        xColors <- xColors[!is.na(names(xColors))]
+    }
+    
     if(all(levels(heat_df$xx) %in% names(xColors))){
         g <- g + theme(axis.text.x = element_text(color=xColors[levels(heat_df$xx)]))
     }
@@ -1021,22 +1234,84 @@ ArchR_topMotifs_KWspin <- function(this_mxCT, this_gxCT, minE=5, num_mot=7, minG
     
     this_mot_df$cluster_abbr <- factor(this_mot_df$cluster_abbr,levels=cOrd)
     this_mot_df <- this_mot_df[order(this_mot_df$cluster_abbr),]
-
-    this_heatMat <- t(this_mxCT[this_mot_df$motif,cOrd])
-    colnames(this_heatMat) <- paste(sep='',colnames(this_heatMat),' (',this_mot_df$maxE,')')
+    
+    if(!is.null(mOrd) & all(mOrd %in% rownames(this_mxCT))){
+        this_heatMat <- t(this_mxCT[mOrd,cOrd])
+        
+        this_xOrd <- mOrd
+    } else {
+        this_heatMat <- t(this_mxCT[this_mot_df$motif,cOrd])
+        colnames(this_heatMat) <- paste(sep='',colnames(this_heatMat),' (',this_mot_df$maxE,')')
+        
+        this_xOrd <- this_mot_df$motif_colnames
+    }
     this_heatMat <- apply(this_heatMat,2,function(x){x <- x/max(x)*100}) #normalize to max
     
-    g <- plotMatMotif(this_heatMat,xOrd=this_mot_df$motif_colnames,yOrd=cOrd,xColors=mColors,yColors=cColors,
+    g <- plotMatMotif(this_heatMat,xOrd=this_xOrd,yOrd=cOrd,xColors=mColors,yColors=cColors,
                       fillGrad=fillGrad,xLab=mLab,yLab=cLab,fLab=eLab)
     
-    return(g)
+    #for top TFs df
+    ll <- unlist(sapply(this_mot_df$motif,FUN=getTFfromMotif))
+    names(ll) <- unname(sapply(names(ll),function(x){ifelse(x %in% this_mot_df$motif,x,substr(x,1,nchar(x)-1))}))
+
+    this_TFs_df <- data.frame('cluster_abbr'=mapvalues(names(ll),
+                                                       from=this_mot_df$motif,to=as.character(this_mot_df$cluster_abbr)),
+                              'motif'=names(ll),'tf'=unname(ll),stringsAsFactors=FALSE)
+    this_TFs_df$class_tf <- paste(sep='_',this_TFs_df$cluster_abbr,this_TFs_df$tf)
+    this_TFs_df$motif <- factor(this_TFs_df$motif,levels=unique(this_mot_df$motif))
+    this_TFs_df$cluster_abbr <- factor(this_TFs_df$cluster_abbr,levels=cOrd)
+    
+    return(list('motE'=g,'df'=this_mot_df,'TFdf'=this_TFs_df,'mat'=this_heatMat))
+}
+
+TF_exp_wilcox_cells_byClass <- function(aMeta,this_gxc,this_TFs_df,yCol,yLab,cOrd=NULL,xLab='Transcription Factor Gene',
+                                        fLab='-log10\nWilcoxon\nFDR',padj_method='BH',pThresh=0.05,
+                                        clustColors=NA,motColors=NULL){
+    
+    tf_exp_wilcox_df <- data.frame('tf'=character(),'class'=character(),'meanIn'=numeric(),'meanOut'=numeric(),
+                                   'wilcoxW'=numeric(),'wilcoxP'=numeric(),stringsAsFactors=FALSE)
+    for(cl in unique(aMeta[,yCol])){
+        if(cl=='scATAC') next
+        cl_cells <- rownames(aMeta[which(aMeta$assay=='snATAC' & aMeta[,yCol]==cl),])
+        non_cl_cells <- rownames(aMeta[which(aMeta$assay=='snATAC' & aMeta[,yCol]!=cl),])
+        for(tf in this_TFs_df[which(this_TFs_df[,yCol]==cl),'tf']){
+            ll <- wilcox.test(this_gxc[tf,cl_cells],this_gxc[tf,non_cl_cells],alternative='greater')
+            tf_exp_wilcox_df <- rbind(tf_exp_wilcox_df,data.frame('tf'=tf,'class'=cl,
+                                                                  'meanIn'=mean(this_gxc[tf,cl_cells]),
+                                                                  'meanOut'=mean(this_gxc[tf,non_cl_cells]),
+                                                                  'wilcoxW'=unname(ll$statistic),'wilcoxP'=ll$p.value,
+                                                                  stringsAsFactors=FALSE))
+        }
+    }
+    tf_exp_wilcox_df$wilcoxPadj <- p.adjust(tf_exp_wilcox_df$wilcoxP,method = padj_method)
+    tf_exp_wilcox_df$log10_wilcoxPadj <- -log10(tf_exp_wilcox_df$wilcoxPadj)
+    tf_exp_wilcox_df$wilcoxPadj_binary <- tf_exp_wilcox_df$wilcoxPadj<pThresh
+    tf_exp_wilcox_df$log10_wilcoxPadj_wNA <- tf_exp_wilcox_df$log10_wilcoxPadj
+    tf_exp_wilcox_df[which(tf_exp_wilcox_df$wilcoxPadj>=pThresh),'log10_wilcoxPadj_wNA'] <- NA
+    
+    top_TFs <- unique(this_TFs_df[order(this_TFs_df$motif),'tf'])
+    tf_exp_wilcox_df$tf_maxVal <- NA
+    for(tf in top_TFs){ 
+        tf_exp_wilcox_df[which(tf_exp_wilcox_df$tf==tf),'tf_maxVal'] <- max(tf_exp_wilcox_df[which(tf_exp_wilcox_df$tf==tf),
+                                                                                             'log10_wilcoxPadj'])
+    }
+    tf_exp_wilcox_df$tf_scaleVal <- (tf_exp_wilcox_df$log10_wilcoxPadj/tf_exp_wilcox_df$tf_maxVal)*100
+    tf_exp_wilcox_df$class <- factor(tf_exp_wilcox_df$class,levels=rev(cOrd))
+    tf_exp_wilcox_df$tf <- factor(tf_exp_wilcox_df$tf,levels=top_TFs)
+    
+    yCol <- 'class'
+    if(!is.null(cOrd)) tf_exp_wilcox_df[,yCol] <- factor(tf_exp_wilcox_df[,yCol],levels=cOrd)
+    tf_exp_wilcox_df <- tf_exp_wilcox_df[order(tf_exp_wilcox_df[,yCol],tf_exp_wilcox_df$tf),
+                           c(yCol,'tf','meanIn','meanOut','wilcoxW','wilcoxP','wilcoxPadj','log10_wilcoxPadj')]
+    
+    return(tf_exp_wilcox_df)
+
 }
 
 
+##PER CELL SCORES
 
-## PER CELL SCORES
-
-ATAC_perCell_score <- function(mat,ps1,ps2){
+perCell_score <- function(mat,ps1,ps2){
     if(!all(c(ps1,ps2) %in% rownames(mat))) stop('all peaks in sets 1 and 2 must be in matrix rownames')
     
     mat_subset <- rbind(mat[ps1,]/length(ps1),mat[ps2,]*-1/length(ps2))
@@ -1044,5 +1319,97 @@ ATAC_perCell_score <- function(mat,ps1,ps2){
     mat_score_byCell <- colSums(mat_subset)
     
     return(mat_score_byCell)
+}
+
+
+##SUPERSTATE EXPERIMENT FUNCTIONS
+
+unique_p2g_function <- function(this_p2g,peakRank_vec){
+    if(!all(c('peak','gene') %in% colnames(this_p2g))) stop('need peak and gene columns')
+    
+    ll <- as.data.frame(table(this_p2g$gene),stringsAsFactors=FALSE)
+    ll <- ll[which(ll$Freq!=1),]
+    this_p2g_all1 <- this_p2g[which(!(this_p2g$gene %in% ll$Var1)),]
+    rr <- unlist(lapply(ll$Var1,function(x){xx <- peakRank_vec[this_p2g[which(this_p2g$gene==x),'peak']]; return(names(xx[which.max(xx)]))}))
+    this_p2g_non1 <- data.frame('peak'=rr,'gene'=ll$Var1,stringsAsFactors=FALSE)
+    toRet <- rbind(this_p2g_all1,this_p2g_non1)
+    if(!identical(sort(unique(this_p2g$gene)),sort(toRet$gene))) stop('not the same genes')
+    return(toRet)
+}
+
+mrna_atac_differential_function <- function(dP_df,dG_df,p2g,label_peakBound=1e6, label_geneBound=1e6,
+                                            plot_full=TRUE,use_BH=TRUE,color_vec=NA){
+    if(!all(c('peak','gene','cellType','log2FC','pval') %in% colnames(dP_df))) stop('missing colnames in diffPeaks')
+    if(!all(c('feature','group','logFC','pval') %in% colnames(dG_df))) stop('missing colnames in diffGenes')
+    if(!all(c('peak','gene') %in% colnames(p2g))) stop('missing colnames in p2g')
+    
+    #directionality does not change significance, but it does change foldchanges.
+    #Only want one statistic for each feature going forward
+    if(any(dP_df$log2FC==0)) stop('diffPeaks has log2FC of 0')
+    dP_df_pos <- dP_df[which(dP_df$log2FC>0),]
+    rownames(dP_df_pos) <- dP_df_pos$peak
+    dG_group <- unique(dG_df$group)[1]
+    dG_df_pos <- dG_df[which((dG_df$logFC>0) | (dG_df$logFC==0 & dG_df$group==dG_group)),]
+    rownames(dG_df_pos) <- dG_df_pos$feature
+    
+    toPlot <- data.frame('peak'=p2g$peak,'gene'=p2g$gene,
+                         'peakCT'=dP_df_pos[p2g$peak,'cellType'],
+                         'geneCT'=dG_df_pos[p2g$gene,'group'],
+                         'peakLog2FC'=dP_df_pos[p2g$peak,'log2FC'],
+                         'geneLogFC'=dG_df_pos[p2g$gene,'logFC'],
+                         'peakPval'=dP_df_pos[p2g$peak,'pval'],
+                         'genePval'=dG_df_pos[p2g$gene,'pval'],
+                         stringsAsFactors=FALSE)
+    #everything is the same if gene logFC==0, so help the cell types agree
+    toPlot[which(toPlot$geneLogFC==0),'geneCT'] <- toPlot[which(toPlot$geneLogFC==0),'peakCT']
+    toPlot$sameDir <- toPlot$peakCT==toPlot$geneCT
+    
+    if(use_BH){
+        toPlot$genePadj <- p.adjust(toPlot$genePval,method='BH')
+        toPlot$peakPadj <- p.adjust(toPlot$peakPval,method='BH')
+        toPlot$log10genePadj <- -log10(toPlot$genePadj)
+        toPlot$log10peakPadj <- -log10(toPlot$peakPadj)
+        toPlot$log10genePadjPlot <- fix_infinite(toPlot$log10genePadj)
+        toPlot$log10peakPadjPlot <- fix_infinite(toPlot$log10peakPadj)
+        
+        gene_plotCol <- 'log10genePadjPlot'
+        peak_plotCol <- 'log10peakPadjPlot'
+        line_intercept <- -log10(0.1)
+        gene_lab <- 'Differential Gene FDR (-log10)'
+        peak_lab <- 'Differential Promoter Peak FDR (-log10)'
+    } else {
+        toPlot$log10genePval <- -log10(toPlot$genePval)
+        toPlot$log10peakPval <- -log10(toPlot$peakPval)
+        toPlot$log10genePvalplot <- fix_infinite(toPlot$log10genePval)
+        toPlot$log10peakPvalplot <- fix_infinite(toPlot$log10peakPval)
+        
+        gene_plotCol <- 'log10genePvalplot'
+        peak_plotCol <- 'log10peakPvalplot'
+        line_intercept <- -log10(0.05)
+        gene_lab <- 'Differential Gene P-value (-log10)'
+        peak_lab <- 'Differential Promoter Peak P-value (-log10)'
+    }
+
+    bound <- ceiling(max(toPlot[,gene_plotCol],toPlot[,peak_plotCol])*1.05)
+
+    if(plot_full){
+        g <- ggplot(toPlot,aes_string(x=gene_plotCol,y=peak_plotCol,color='geneCT',shape='sameDir',label='gene')) 
+    } else {
+        g <- ggplot(toPlot[which(toPlot[,gene_plotCol]>=line_intercept | toPlot[,peak_plotCol]>=line_intercept),],
+                    aes_string(x=gene_plotCol,y=peak_plotCol,color='geneCT',shape='sameDir',label='gene'))
+    }
+    
+    g <- g +
+            geom_point(size=2,alpha=0.5) + theme_bw(base_size=20) +  
+            labs(x=gene_lab,y=peak_lab,color='Greater Cell Type\nIn Gene Exp',shape='Greater Cell Type\nPeak Agreement') + 
+            geom_vline(xintercept=line_intercept,linetype='dashed') + 
+            geom_hline(yintercept=line_intercept,linetype='dashed') +
+            expand_limits(x=0) + expand_limits(y=0) + expand_limits(x=bound) + expand_limits(y=bound) +
+            geom_text_repel(data=toPlot[which(toPlot[,gene_plotCol]>label_geneBound | 
+                                                       toPlot[,peak_plotCol]>label_peakBound),],seed=0)
+    if(all(toPlot$label %in% names(color_vec))){ g <- g + scale_color_manual(values=color_vec)}
+    
+    return(g)
+    
 }
 

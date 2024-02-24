@@ -39,6 +39,23 @@ QC_steps_barplot <- function(cellCount_df,this_meta,CT_col,CT_colors,CT_order,
     return(g)
 }
 
+readCount_byCT <- function(df,CT_col,fun='mean',
+                           cols_vec=c('nReads_noDedup','nReads_dedup',
+                                      'nReads_peak','nReads_promoter','nReads_chrM','nReads_blacklist')){
+    if(!all(c(cols_vec,CT_col) %in% colnames(df))) stop('colname issue')
+    
+    for(cols in cols_vec){
+        if(cols==cols_vec[1]){
+            means_df <- aggregate(df[,cols] ~ df[,CT_col], FUN=fun)
+            colnames(means_df) <- c('cellType',cols)
+        } else {
+            ll <- aggregate(df[,cols] ~ df[,CT_col], FUN=fun)
+            if(!identical(ll[,1],means_df[,CT_col])) stop('cell type out of order')
+            means_df[,cols] <- ll[,2]
+        }
+    }
+    return(means_df)
+}
 
 scalePeak_forHeatmap <- function(gOrd,ctOrd,gp_map,pCTnorm,peakCTcutoff=0.05){
     if(!all(gOrd %in% names(gp_map))) stop('all genes from order need to be in gp_map')
