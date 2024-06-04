@@ -1,6 +1,8 @@
 ## Chromatin accessibility atlas of rheumatoid arthritis tissue
 
-Code corresponding to Weinand et al., The chromatin landscape of pathogenic transcriptional cell states in rheumatoid arthritis, Nature Communications, Accepted, 2024.
+Code corresponding to Weinand et al., The chromatin landscape of pathogenic transcriptional cell states in rheumatoid arthritis, Nature Communications, 2024.
+
+Paper: https://www.nature.com/articles/s41467-024-48620-7
 
 Contact: Kathryn Weinand kweinand@fas.harvard.edu 
 
