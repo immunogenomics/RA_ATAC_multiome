@@ -4,6 +4,12 @@ Code corresponding to Weinand et al., The chromatin landscape of pathogenic tran
 
 Paper: https://www.nature.com/articles/s41467-024-48620-7
 
+dbGaP: https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/study.cgi?study_id=phs003417.v2.p1
+
+Synapse: https://doi.org/10.7303/syn53650034
+
+ARK portal: https://arkportal.synapse.org/Explore/Datasets/DetailsPage?id=53650034
+
 Contact: Kathryn Weinand kweinand@fas.harvard.edu 
 
 
@@ -20,7 +26,7 @@ We recommend downloading software via conda.
 
 ### Directory information
 
-paper_figures: jupyter notebooks used to create the figures/tables in the submitted manuscript. There are also two R files with the functions used in the jupyter notebooks.
+paper_figures: jupyter notebooks used to create the figures/tables in the paper. There are also two R files with the functions used in the jupyter notebooks.
 
-scripts: The scripts used to process the data split up by analysis. Usage information by script can be found by using Rscript {script} -h for R scripts or python {script} -h for python scripts.
+scripts: The scripts used to process the data split up by analysis. Usage information by script can be found by using ```Rscript {script} -h``` for R scripts or ```python {script} -h``` for python scripts.
 
